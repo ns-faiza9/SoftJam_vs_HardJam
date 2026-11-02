@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title | default("StartSense | Electric Drive Intelligence") }}</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <!-- Custom Dark Industrial CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="dark-theme">
+    <div class="d-flex" id="wrapper">
+        <!-- Sidebar -->
+        <div class="sidebar border-end" id="sidebar-wrapper">
+            <div class="sidebar-heading border-bottom p-3">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fs-3">⚡</span>
+                    <div>
+                        <h5 class="m-0 fw-bold text-white tracking-wide">StartSense</h5>
+                        <small class="text-cyan fw-semibold">Variant 02.08 – Soft vs Hard Jam</small>
+                    </div>
+                </div>
+                <div class="mt-2 text-muted small">Target: STM32 NUCLEO-H753ZI</div>
+            </div>
+
+            <div class="px-3 pt-3">
+                <p class="section-title">NAVIGATION</p>
+            </div>
+            <div class="list-group list-group-flush px-2">
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'overview' else '' }}" href="/">
+                    📊 1. Overview (Command Center)
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'monitoring' else '' }}" href="/monitoring">
+                    📡 2. Live Monitoring
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'simulation' else '' }}" href="/simulation">
+                    🧪 3. Startup Simulation
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'ml' else '' }}" href="/ml">
+                    🧠 4. ML Intelligence Lab
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'safety' else '' }}" href="/safety">
+                    🛡️ 5. Safety Decision Center
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'history' else '' }}" href="/history">
+                    📜 6. Experiment History
+                </a>
+                <a class="list-group-item list-group-item-action {{ 'active' if active_page == 'architecture' else '' }}" href="/architecture">
+                    🏗️ 7. System Architecture
+                </a>
+            </div>
+
+            <!-- STM32 Hardware & Serial Link Box in Sidebar -->
+            <div class="p-3 mt-3">
+                <div class="card bg-darker border-secondary">
+                    <div class="card-body p-3">
+                        <h6 class="text-uppercase fw-bold text-cyan fs-7 mb-2">STM32 Serial Link</h6>
+                        <div class="mb-2">
+                            <label class="form-label text-muted small mb-1">COM Port</label>
+                            <select id="sidebar-com-port" class="form-select form-select-sm bg-dark text-white border-secondary">
+                                {% for p in serial_ports %}
+                                <option value="{{ p.device }}" {{ 'selected' if p.is_stlink else '' }}>{{ p.device }} ({{ p.description[:20] }})</option>
+                                {% endfor %}
+                                <option value="MOCK" {{ 'selected' if not serial_ports else '' }}>MOCK_MODE (Virtual Port)</option>
+                            </select>
+                        </div>
+                        <div class="d-flex gap-2 mb-2">
+                            <button id="btn-connect" class="btn btn-primary btn-sm w-100 fw-semibold" onclick="connectSerial()">Connect</button>
+                            <button id="btn-disconnect" class="btn btn-outline-secondary btn-sm w-100" onclick="disconnectSerial()">Disconnect</button>
+                        </div>
+                        <div id="sidebar-link-badge" class="badge-mock mb-3 text-center py-1">
+                            ● MOCK MODE ACTIVE
+                        </div>
+
+                        <!-- Real Hardware Potentiometer Gauge -->
+                        <h6 class="text-uppercase fw-bold text-pot fs-7 mb-1">Physical Potentiometer (PA3)</h6>
+                        <div class="pot-box p-2 rounded mb-2">
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span>Raw ADC: <strong id="sidebar-adc-val" class="text-white">{{ pot.adc_raw }}</strong> / 4095</span>
+                                <span><strong id="sidebar-volts-val" class="text-white">{{ pot.voltage }}</strong> V</span>
+                            </div>
+                            <div class="text-muted small mt-1">
+                                Load Severity: <strong id="sidebar-load-val" class="text-pot">{{ (pot.normalized * 100) | round(1) }}%</strong>
+                            </div>
+                        </div>
+
+                        <!-- Mock Slider (Always available to turn the dial) -->
+                        <label class="form-label text-muted small mb-1">Dial Load Proxy</label>
+                        <input type="range" class="form-range" id="pot-slider" min="0" max="4095" step="64" value="{{ pot.adc_raw }}" oninput="updatePotentiometer(this.value)">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page Content -->
+        <div id="page-content-wrapper" class="w-100">
+            <!-- Top Navbar -->
+            <nav class="navbar navbar-expand navbar-dark bg-card border-bottom px-4 py-2">
+                <span class="navbar-brand text-white fw-bold fs-6">
+                    ⚡ StartSense Drive Intelligence &bull; Variant 02.08
+                </span>
+                <div class="ms-auto d-flex align-items-center gap-3">
+                    <span class="badge bg-secondary-subtle text-cyan border border-cyan-subtle px-3 py-2 rounded-pill small">
+                        HYBRID H/W + S/W SIMULATION
+                    </span>
+                    <a href="https://github.com" target="_blank" class="btn btn-sm btn-outline-secondary">Help</a>
+                </div>
+            </nav>
+
+            <!-- Main Container -->
+            <div class="container-fluid p-4">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

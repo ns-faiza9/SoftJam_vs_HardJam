@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-3 mb-4" style="border-left: 5px solid var(--color-hard-jam);">
+    <h4 class="fw-bold text-white m-0">🛡️ Safety Decision Center & Embedded Hardware Interlocks</h4>
+    <p class="text-muted small m-0 mt-1">Decoupled architecture: ML recommends operational actions; STM32 Cortex-M7 independently validates against hard physical limits.</p>
+</div>
+
+<!-- Strict Control-Plane Isolation Policy -->
+<div class="card p-3 mb-4 bg-darker border-secondary">
+    <div class="kpi-label text-cyan">STRICT CONTROL-PLANE ISOLATION POLICY</div>
+    <p class="text-muted small m-0 mt-1" style="line-height: 1.4;">
+        The ML engine on the laptop <strong>never writes directly to motor PWM registers, gate drivers, or PID gains</strong>.
+        It can only recommend one of 4 discrete safe actions. The embedded STM32 firmware enforces local hardware safety interlocks and will autonomously reject any recommendation that violates thermal, overcurrent, or stall constraints.
+    </p>
+</div>
+
+<!-- 4 Action Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card p-3 h-100 border-success">
+            <h6 class="fw-bold text-normal">1. ACCEPT_START</h6>
+            <p class="text-muted small m-0">Normal inrush confirmed; healthy acceleration; transfer control to speed governor.</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 h-100" style="border-color: #FFD54F;">
+            <h6 class="fw-bold" style="color: #FFD54F;">2. RETRY_SAFE_PROFILE</h6>
+            <p class="text-muted small m-0">Marginal binding or low ML confidence. Retry with gentle pulsing declogging ramp.</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 h-100 border-warning">
+            <h6 class="fw-bold text-soft-jam">3. DERATE</h6>
+            <p class="text-muted small m-0">Soft jam with friction. Limit maximum drive torque by 30% to prevent thermal runaway.</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card p-3 h-100 border-danger">
+            <h6 class="fw-bold text-hard-jam">4. STOP</h6>
+            <p class="text-muted small m-0">Severe rotor lockup. Immediate electrical cutoff to protect stator windings.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Interactive Embedded Safety Interlock Tester -->
+<div class="card p-3 mb-4">
+    <h6 class="fw-bold text-white mb-2">Interactive Embedded Safety Interlock & Fault-Injection Tester</h6>
+    <p class="text-muted small mb-3">Simulate what happens when an unsafe recommendation or hardware fault occurs on the STM32 Cortex-M7.</p>
+
+    <div class="row g-3 align-items-end mb-3">
+        <div class="col-md-3">
+            <label class="form-label text-muted small mb-1">Laptop Recommendation</label>
+            <select id="val-rec" class="form-select form-select-sm">
+                <option value="ACCEPT_START" selected>ACCEPT_START</option>
+                <option value="DERATE">DERATE</option>
+                <option value="RETRY_SAFE_PROFILE">RETRY_SAFE_PROFILE</option>
+                <option value="STOP">STOP</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label text-muted small mb-1">Local Current: <span id="disp-curr" class="text-white">8.5 A</span></label>
+            <input type="range" class="form-range" id="val-curr" min="0" max="25" step="0.5" value="8.5" oninput="document.getElementById('disp-curr').innerText=this.value+' A'; testSafety();">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label text-muted small mb-1">Stator Temp: <span id="disp-temp" class="text-white">32 °C</span></label>
+            <input type="range" class="form-range" id="val-temp" min="20" max="95" step="1" value="32" oninput="document.getElementById('disp-temp').innerText=this.value+' °C'; testSafety();">
+        </div>
+        <div class="col-md-3">
+            <div class="form-check form-switch mt-2">
+                <input class="form-check-input" type="checkbox" id="val-link" checked onchange="testSafety()">
+                <label class="form-check-label text-muted small" for="val-link">Serial Link Healthy</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Validation Result Banner -->
+    <div id="safety-verdict-card" class="card p-3" style="border-left: 6px solid var(--color-normal);">
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <div>
+                <span class="fs-7 text-muted text-uppercase fw-bold">EMBEDDED VALIDATION VERDICT</span>
+                <div class="fs-4 fw-bold text-normal my-1" id="verdict-title">RECOMMENDATION VALIDATED & ACCEPTED</div>
+            </div>
+            <div>
+                <span class="badge bg-dark border border-secondary px-3 py-2 fs-6">
+                    Action Taken: <strong id="verdict-action" class="text-normal">ACCEPT_START</strong>
+                </span>
+            </div>
+        </div>
+        <div class="small text-muted mt-2">
+            Reason Code: <code id="verdict-code">NONE_VALIDATED</code> &bull; <span id="verdict-desc">Action confirmed.</span>
+        </div>
+    </div>
+</div>
+
+<!-- Local Physical Limits Table -->
+<div class="card p-3">
+    <h6 class="fw-bold text-white mb-2">STM32 Hard Boundaries & Safe Fallback States</h6>
+    <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0">
+            <thead>
+                <tr><th>Hardware Limit</th><th>Threshold</th><th>Hardware Interlock Override</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Overcurrent Ceiling</td><td><strong>15.0 A</strong></td><td>Forces STOP immediately, overriding laptop</td></tr>
+                <tr><td>Locked Rotor Stall Limit</td><td><strong>0.8 s</strong></td><td>Trips circuit breaker if motor is stalled > 0.8s</td></tr>
+                <tr><td>Maximum Stator Temp</td><td><strong>75.0 °C</strong></td><td>Rejects ACCEPT_START, forces DERATE / STOP</td></tr>
+                <tr><td>Minimum Valid Speed</td><td><strong>1500 RPM</strong></td><td>Refuses ACCEPT_START if target speed was never reached</td></tr>
+                <tr><td>Heartbeat Watchdog</td><td><strong>500 ms</strong></td><td>Autonomous FALLBACK_SAFE_SHUTDOWN if serial cable is pulled</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function testSafety() {
+        const payload = {
+            action: document.getElementById("val-rec").value,
+            peak_current: parseFloat(document.getElementById("val-curr").value),
+            temp: parseFloat(document.getElementById("val-temp").value),
+            speed: 2400.0,
+            link_healthy: document.getElementById("val-link").checked
+        };
+
+        fetch("/api/safety_test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            const card = document.getElementById("safety-verdict-card");
+            const title = document.getElementById("verdict-title");
+            const action = document.getElementById("verdict-action");
+            const code = document.getElementById("verdict-code");
+            const desc = document.getElementById("verdict-desc");
+
+            const isAccepted = data.status === "ACCEPTED";
+            const color = isAccepted ? "#00E676" : "#FF3D00";
+
+            card.style.borderLeft = "6px solid " + color;
+            title.innerText = isAccepted ? "RECOMMENDATION VALIDATED & ACCEPTED" : "RECOMMENDATION REJECTED BY LOCAL STM32 LIMITS";
+            title.style.color = color;
+            action.innerText = data.action_taken;
+            action.style.color = color;
+            code.innerText = data.reason_code;
+            desc.innerText = data.reason_description;
+        });
+    }
+
+    document.getElementById("val-rec").addEventListener("change", testSafety);
+</script>
+{% endblock %}

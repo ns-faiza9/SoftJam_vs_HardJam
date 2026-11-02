@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-3 mb-4" style="border-left: 5px solid var(--color-cyan);">
+    <h4 class="fw-bold text-white m-0">📡 Live Telemetry & Transient Signature Monitoring</h4>
+    <p class="text-muted small m-0 mt-1">High-frequency real-time stream of electromechanical transient signals during starter engagement.</p>
+</div>
+
+<!-- Signal Provenance & Authenticity Cards -->
+<div class="row g-3 mb-3">
+    <div class="col-md-5">
+        <div class="card p-3 pot-box h-100">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="fs-7 fw-bold text-uppercase text-pot">
+                    {{ 'REAL STM32 HARDWARE INPUT' if is_hw else 'MOCK HARDWARE EMULATION' }}
+                </span>
+                <span class="badge bg-dark text-pot border border-pot">PA3 (ADC1_INP15)</span>
+            </div>
+            <div class="fs-3 fw-bold text-pot my-1">
+                {{ pot.adc_raw }} <span class="fs-6 text-muted">counts</span> ({{ pot.voltage }} V)
+            </div>
+            <div class="small text-muted">
+                Mapped Physical Load Proxy: <strong class="text-pot">{{ (pot.normalized * 100) | round(1) }}%</strong>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card p-3 h-100 bg-darker border-secondary">
+            <span class="fs-7 fw-bold text-uppercase text-cyan">SIGNAL AUTHENTICITY NOTICE</span>
+            <p class="text-muted small m-0 mt-1" style="line-height: 1.4;">
+                Physical motor, current sensors, and encoders are not physically present. Stator current, speed, encoder pulse intervals, and temperature are
+                <strong class="text-cyan">SIMULATED</strong> using a 2nd-order electromechanical ODE engine.
+                The potentiometer reading is the <strong class="text-pot">REAL HARDWARE INPUT</strong>.
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- Controls -->
+<div class="card p-3 mb-4 bg-card">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1">Preset Signature to Monitor</label>
+            <select id="sel-preset" class="form-select form-select-sm">
+                <option value="NORMAL" {{ 'selected' if preset == 'NORMAL' else '' }}>NORMAL Startup (Healthy)</option>
+                <option value="SOFT JAM" {{ 'selected' if preset == 'SOFT JAM' else '' }}>SOFT JAM Startup (Friction / Drag)</option>
+                <option value="HARD JAM" {{ 'selected' if preset == 'HARD JAM' else '' }}>HARD JAM Startup (Rotor Lockup)</option>
+                <option value="POT" {{ 'selected' if preset == 'POT' else '' }}>Use Real Potentiometer Dial Position</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label text-muted small mb-1">Gate Driver PWM: <span id="pwm-display">{{ pwm }}%</span></label>
+            <input type="range" class="form-range" id="input-pwm" min="40" max="100" step="5" value="{{ pwm }}" oninput="document.getElementById('pwm-display').innerText=this.value+'%'">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label text-muted small mb-1">Direction</label>
+            <select id="sel-dir" class="form-select form-select-sm">
+                <option value="FORWARD" selected>FORWARD</option>
+                <option value="REVERSE">REVERSE</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <button class="btn btn-primary btn-sm w-100 py-2 fw-semibold" onclick="refreshTelemetry()">🔄 Refresh Live Stream</button>
+        </div>
+    </div>
+</div>
+
+<!-- 4 Telemetry Quick KPI Badges -->
+<div class="row g-3 mb-3">
+    <div class="col"><div class="kpi-card text-center"><div class="kpi-label">Start Command</div><div class="kpi-val text-white fs-5 mt-1">ENGAGED</div></div></div>
+    <div class="col"><div class="kpi-card text-center"><div class="kpi-label">Simulated Current</div><div class="kpi-val fs-5 mt-1" id="kpi-curr">{{ peak_current }} A</div></div></div>
+    <div class="col"><div class="kpi-card text-center"><div class="kpi-label">Simulated Speed</div><div class="kpi-val fs-5 mt-1 text-cyan" id="kpi-speed">{{ max_speed }} RPM</div></div></div>
+    <div class="col"><div class="kpi-card text-center"><div class="kpi-label">Simulated Temp</div><div class="kpi-val fs-5 mt-1 text-warning" id="kpi-temp">{{ final_temp }} °C</div></div></div>
+    <div class="col"><div class="kpi-card text-center"><div class="kpi-label">Encoder Interval</div><div class="kpi-val fs-5 mt-1 text-info" id="kpi-pulse">{{ pulse_interval }} ms</div></div></div>
+</div>
+
+<!-- 4 Real-Time Plotly Charts -->
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6 class="fw-bold text-white small mb-1">Stator Current vs Time [SIMULATED]</h6>
+            <div id="chart-current" style="height: 250px;"></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6 class="fw-bold text-white small mb-1">Angular Speed (RPM) vs Time [SIMULATED]</h6>
+            <div id="chart-speed" style="height: 250px;"></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6 class="fw-bold text-white small mb-1">Stator Temperature (°C) vs Time [SIMULATED]</h6>
+            <div id="chart-temp" style="height: 250px;"></div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card p-3">
+            <h6 class="fw-bold text-white small mb-1">PWM Duty Cycle & Encoder Intervals [SIMULATED]</h6>
+            <div id="chart-pwm" style="height: 250px;"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let telemetryData = {{ telemetry_json | safe }};
+
+    function renderPlots(data) {
+        const t = data.time_sec;
+        const layoutDark = {
+            paper_bgcolor: '#161B22',
+            plot_bgcolor: '#0E1117',
+            font: { color: '#8B949E' },
+            margin: { t: 20, b: 30, l: 40, r: 20 },
+            xaxis: { gridcolor: '#21262D' },
+            yaxis: { gridcolor: '#21262D' }
+        };
+
+        // 1. Current
+        Plotly.newPlot('chart-current', [
+            { x: t, y: data.current_sim_amp, type: 'scatter', mode: 'lines', line: { color: '#00E5FF', width: 2 }, name: 'Current (A)' }
+        ], {
+            ...layoutDark,
+            shapes: [{ type: 'line', y0: 15.0, y1: 15.0, x0: 0, x1: 3.0, line: { color: '#FF3D00', dash: 'dash' } }]
+        }, { responsive: true, displayModeBar: false });
+
+        // 2. Speed
+        Plotly.newPlot('chart-speed', [
+            { x: t, y: data.speed_sim_rpm, type: 'scatter', mode: 'lines', line: { color: '#00E676', width: 2 }, name: 'Speed (RPM)' }
+        ], {
+            ...layoutDark,
+            shapes: [{ type: 'line', y0: 2000, y1: 2000, x0: 0, x1: 3.0, line: { color: '#8B949E', dash: 'dot' } }]
+        }, { responsive: true, displayModeBar: false });
+
+        // 3. Temp
+        Plotly.newPlot('chart-temp', [
+            { x: t, y: data.temp_sim_celsius, type: 'scatter', mode: 'lines', line: { color: '#FF8A65', width: 2 }, name: 'Temp (°C)' }
+        ], {
+            ...layoutDark,
+            shapes: [{ type: 'line', y0: 75.0, y1: 75.0, x0: 0, x1: 3.0, line: { color: '#FF3D00', dash: 'dash' } }]
+        }, { responsive: true, displayModeBar: false });
+
+        // 4. PWM & Pulse
+        Plotly.newPlot('chart-pwm', [
+            { x: t, y: data.pwm_duty, type: 'scatter', mode: 'lines', line: { color: '#B388FF', width: 2 }, name: 'PWM (%)' },
+            { x: t, y: data.encoder_interval_ms, type: 'scatter', mode: 'lines', line: { color: '#FFD54F', width: 1.5, dash: 'dot' }, name: 'Pulse (ms)' }
+        ], layoutDark, { responsive: true, displayModeBar: false });
+    }
+
+    renderPlots(telemetryData);
+
+    function refreshTelemetry() {
+        const preset = document.getElementById("sel-preset").value;
+        const pwm = document.getElementById("input-pwm").value;
+        const dir = document.getElementById("sel-dir").value;
+
+        fetch(`/api/telemetry?condition=${encodeURIComponent(preset)}&pwm=${pwm}&dir=${dir}`)
+        .then(res => res.json())
+        .then(data => {
+            renderPlots(data.telemetry);
+            document.getElementById("kpi-curr").innerText = data.peak_curr + " A";
+            document.getElementById("kpi-speed").innerText = data.max_spd + " RPM";
+            document.getElementById("kpi-temp").innerText = data.final_temp + " °C";
+            document.getElementById("kpi-pulse").innerText = data.pulse + " ms";
+        });
+    }
+</script>
+{% endblock %}

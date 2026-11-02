@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StartSense – Soft-Jam vs Hard-Jam Starter (Variant 02.08)</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+    <!-- Custom Dark Industrial Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="dark-theme">
+
+    <!-- Top Sticky Header Bar -->
+    <nav class="navbar navbar-expand-lg navbar-custom sticky-top px-4 py-2">
+        <div class="d-flex align-items-center gap-3">
+            <span class="fs-3">⚡</span>
+            <div>
+                <h5 class="m-0 fw-bold text-white tracking-wide d-flex align-items-center gap-2">
+                    StartSense 
+                    <span class="badge bg-dark border border-secondary text-cyan font-mono fs-8 fw-semibold px-2 py-1">Variant 02.08</span>
+                </h5>
+            </div>
+        </div>
+
+        <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+            <!-- In-page smooth jump links -->
+            <a href="#section-hardware" class="nav-pill-custom">1. Hardware Feed</a>
+            <a href="#section-verdict" class="nav-pill-custom"> 2. Live Decision</a>
+            <a href="#section-telemetry" class="nav-pill-custom"> 3. Motor Waveforms</a>
+            <a href="#section-ml" class="nav-pill-custom">4. ML Evidence</a>
+            <a href="#section-manifest" class="nav-pill-custom">5. Run Manifest</a>
+
+            <!-- Hardware Link Control Widget -->
+            <div class="d-flex align-items-center gap-2 ms-2 p-1 bg-darker rounded-3 border border-secondary">
+                <select id="com-port-select" class="form-select form-select-sm bg-dark text-white border-0 py-1 font-mono fs-8" style="width: 145px;">
+                    {% for p in serial_ports %}
+                    <option value="{{ p.device }}" {{ 'selected' if p.is_stlink else '' }}>{{ p.device }} (ST-Link)</option>
+                    {% endfor %}
+                    <option value="MOCK" {{ 'selected' if not serial_ports else '' }}>MOCK_MODE</option>
+                </select>
+                <button id="btn-toggle-link" class="btn btn-sm {% if is_connected and not is_mock_mode %}btn-outline-danger{% else %}btn-primary{% endif %} py-1 px-3 fs-8 fw-bold" onclick="toggleHardwareConnection()">
+                    {% if is_connected and not is_mock_mode %}Disconnect{% else %}Connect{% endif %}
+                </button>
+                <span id="header-link-badge" class="{% if is_connected and not is_mock_mode %}badge-hardware{% else %}badge-mock{% endif %} px-2 py-1 fs-8">
+                    {% if is_connected and not is_mock_mode %}
+                    <span class="led-indicator led-green"></span> HARDWARE ({{ port or 'COM9' }})
+                    {% else %}
+                    <span class="led-indicator led-cyan"></span> MOCK MODE
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4 py-3">
+
+        <!-- ========================================== -->
+        <!-- SECTION 1: LIVE HARDWARE & PUTTY TERMINAL -->
+        <!-- ========================================== -->
+        <div id="section-hardware" class="card p-3 mb-3" style="border-left: 4px solid var(--color-cyan); background: linear-gradient(135deg, rgba(16, 22, 36, 0.95) 0%, rgba(22, 34, 56, 0.8) 100%);">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="section-header-title d-flex align-items-center gap-2">
+                        <span>📟 1. Live STM32 Hardware Feed & PuTTY Terminal</span>
+                    </h5>
+                    <div class="section-header-subtitle">Direct USB Serial Stream from NUCLEO-H753ZI &bull; 100 kΩ Potentiometer on Pin PA3 (ADC1_INP15)</div>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-dark border border-secondary text-pot font-mono px-3 py-1 fs-8">PA3 / ADC1_CH15</span>
+                    <span class="badge bg-dark border border-secondary text-cyan font-mono px-3 py-1 fs-8">115200 8-N-1</span>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <!-- Left: Big Live Sensor Gauge -->
+                <div class="col-lg-5">
+                    <div class="card p-3 h-100 bg-darker border-secondary">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="kpi-label text-pot">REAL PHYSICAL ADC READING</span>
+                            <span id="pot-source-tag" class="badge bg-secondary text-white fs-8">STREAMING LIVE</span>
+                        </div>
+
+                        <!-- Live ADC Value Display -->
+                        <div class="d-flex align-items-baseline gap-2 my-2">
+                            <span class="fs-1 fw-bold text-pot font-mono" id="live-adc-val">{{ pot.adc_raw }}</span>
+                            <span class="fs-7 text-muted font-mono">/ 4095 counts</span>
+                            <span class="fs-3 fw-bold text-white ms-auto font-mono" id="live-volts-val">{{ pot.voltage }} V</span>
+                        </div>
+
+                        <!-- Range Bar with 3 Hackathon Problem Zones -->
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between fs-8 text-muted font-mono mb-1">
+                                <span>0V (0)</span>
+                                <span>1.15V (1433)</span>
+                                <span>2.57V (3194)</span>
+                                <span>3.3V (4095)</span>
+                            </div>
+                            <div class="progress bg-dark" style="height: 14px; border: 1px solid var(--border-subtle); border-radius: 7px; overflow: hidden;">
+                                <div id="live-adc-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" role="progressbar" style="width: {{ (pot.normalized * 100) }}%; transition: width 0.2s ease;"></div>
+                            </div>
+                            <div class="d-flex justify-content-between fs-8 mt-1 font-mono">
+                                <span class="text-normal fw-bold">🟢 NORMAL (0-35%)</span>
+                                <span class="text-soft-jam fw-bold">🟡 SOFT JAM (35-78%)</span>
+                                <span class="text-hard-jam fw-bold">🔴 HARD JAM (&gt;78%)</span>
+                            </div>
+                        </div>
+
+                        <!-- Real-time mapped motor condition alert -->
+                        <div id="live-zone-alert" class="p-2 rounded-3 border text-center fw-bold fs-7 tracking-wide" style="background: rgba(255, 179, 0, 0.12); border-color: #FFB300 !important; color: #FFB300;">
+                            CURRENT POTENTIOMETER DIAL ZONE: SOFT JAM
+                        </div>
+
+                        <!-- Mock Slider (in case board is not connected, user can turn dial right on screen!) -->
+                        <div class="mt-3 pt-2 border-top border-secondary">
+                            <div class="d-flex justify-content-between text-secondary fs-8 mb-1">
+                                <span>Turn Potentiometer on Breadboard (or drag slider in Mock Mode):</span>
+                                <span id="slider-pct-label" class="text-cyan font-mono fw-bold">{{ (pot.normalized * 100) | round(1) }}%</span>
+                            </div>
+                            <input type="range" class="form-range" id="mock-slider" min="0" max="4095" step="32" value="{{ pot.adc_raw }}" oninput="onSliderMove(this.value)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: PuTTY Serial Terminal Window -->
+                <div class="col-lg-7">
+                    <div class="terminal-window h-100 d-flex flex-column">
+                        <div class="terminal-header">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="window-dots">
+                                    <div class="dot dot-red"></div>
+                                    <div class="dot dot-yellow"></div>
+                                    <div class="dot dot-green"></div>
+                                </div>
+                                <span class="badge bg-black text-cyan font-mono px-2 py-0 ms-2 fs-8">PuTTY Terminal</span>
+                                <span class="text-secondary fs-8 font-mono" id="terminal-port-label">COM9 &bull; 115200 baud</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-success-subtle text-success py-1 px-2 fs-8 d-flex align-items-center gap-1 font-mono">
+                                    <span class="led-indicator led-green"></span> 4 Hz STREAM
+                                </span>
+                                <button class="btn btn-outline-secondary btn-sm py-0 px-2 fs-8 text-secondary" onclick="clearTerminal()">Clear</button>
+                            </div>
+                        </div>
+                        <div id="putty-terminal-box" class="terminal-body flex-grow-1">Loading incoming serial stream...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SECTION 2: INSTANT EVALUATOR VERDICT (ML) -->
+        <!-- ========================================== -->
+        <div id="section-verdict" class="card p-3 mb-3 bg-card border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="section-header-title">🎯 2. Instant Evaluator Decision & Graded Safety Response</h5>
+                    <div class="section-header-subtitle">Section 4 & 5 Rubric &bull; Ordinal Severity ML Classification & STM32 Local Interlock Response</div>
+                </div>
+                <div>
+                    <button id="btn-engage-starter" class="btn btn-engage-starter px-3 py-2 fs-7" onclick="triggerStarterTest()">
+                        🚀 Engage Starter Simulation (At Current Dial Load)
+                    </button>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <!-- Evaluator Condition Box -->
+                <div class="col-md-4">
+                    <div id="card-verdict-condition" class="verdict-card h-100" style="border-color: #00E676; background: rgba(0, 230, 118, 0.08);">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="fs-8 fw-bold text-uppercase text-secondary">CLASSIFIED CONDITION</span>
+                            <span class="badge bg-secondary font-mono fs-8" id="badge-run-id">RUN_INIT</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 my-2">
+                            <span class="fs-2" id="verdict-icon">🟢</span>
+                            <span class="fs-3 fw-bold" id="verdict-class" style="color: #00E676;">NORMAL</span>
+                        </div>
+                        <div class="d-flex justify-content-between fs-7 text-secondary border-top border-secondary pt-2 mt-auto">
+                            <span>ML Confidence: <strong class="text-white font-mono" id="verdict-conf">99.2%</strong></span>
+                            <span>Model: <strong class="text-cyan">Random Forest</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Graded Operational Recommendation -->
+                <div class="col-md-4">
+                    <div class="verdict-card h-100">
+                        <span class="fs-8 fw-bold text-uppercase text-secondary">GRADED ACTION RECOMMENDATION</span>
+                        <div class="fs-3 fw-bold text-cyan my-2 font-mono" id="verdict-action">ACCEPT_START</div>
+                        <p class="fs-7 text-secondary m-0" id="verdict-rationale" style="line-height: 1.4;">
+                            Healthy rotor acceleration; nominal inrush current within bounds. Hand over drive control to governor.
+                        </p>
+                        <div class="mt-auto pt-2 border-top border-secondary text-muted fs-8 font-mono">
+                            Allowed Actions: <code>ACCEPT_START</code> &bull; <code>RETRY_SAFE_PROFILE</code> &bull; <code>DERATE</code> &bull; <code>STOP</code>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STM32 Local Safety Boundary Check -->
+                <div class="col-md-4">
+                    <div class="verdict-card h-100">
+                        <span class="fs-8 fw-bold text-uppercase text-secondary">STM32 LOCAL HARDWARE INTERLOCK</span>
+                        <div class="d-flex align-items-center gap-2 my-2">
+                            <span class="badge bg-success-subtle text-success fs-6 fw-bold px-2 py-1 font-mono" id="verdict-mcu-ack">ACCEPTED</span>
+                            <span class="text-secondary fs-8">Code: <code class="text-cyan font-mono" id="verdict-reason-code">NONE_VALIDATED</code></span>
+                        </div>
+                        <p class="fs-7 text-secondary m-0" style="line-height: 1.4;">
+                            Cortex-M7 verified local overcurrent (&lt;15A), thermal ceiling (&lt;75°C), and watchdog heartbeat.
+                        </p>
+                        <div class="mt-auto pt-2 border-top border-secondary text-muted fs-8">
+                            Protection: Overcurrent, locked rotor cutoff, communication watchdog.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SECTION 3: SYNCHRONIZED MOTOR WAVEFORMS   -->
+        <!-- ========================================== -->
+        <div id="section-telemetry" class="card p-3 mb-3 bg-card border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="section-header-title">📈 3. Synchronized Physical-Signal Decision Timeline</h5>
+                    <div class="section-header-subtitle">Section 3 &bull; Stator Current (A), Speed (RPM), and Temperature (°C) derived from Python Motor Physics Model</div>
+                </div>
+                <div class="d-flex gap-2 text-secondary fs-8 align-items-center flex-wrap">
+                    <button id="btn-toggle-autotrack" class="btn btn-sm btn-outline-info py-0 px-2 fs-8 fw-semibold" onclick="toggleAutoTrack()">
+                        ⚡ Auto-Track Dial: ON
+                    </button>
+                    <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1 fs-8">⚙️ MOTOR SIGNALS ARE SOFTWARE-SIMULATED</span>
+                    <span class="metric-pill">Peak I <span class="badge bg-secondary py-0 fs-9">SIM</span>: <strong id="val-peak-i" class="text-cyan font-mono">7.2 A</strong></span>
+                    <span class="metric-pill">Max Speed <span class="badge bg-secondary py-0 fs-9">SIM</span>: <strong id="val-max-spd" class="text-normal font-mono">2950 RPM</strong></span>
+                    <span class="metric-pill">Temp Rise <span class="badge bg-secondary py-0 fs-9">SIM</span>: <strong id="val-temp-rise" class="text-soft-jam font-mono">+1.4 °C</strong></span>
+                </div>
+            </div>
+
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <div class="card p-2 bg-darker border-secondary">
+                        <div class="d-flex justify-content-between text-secondary fs-8 mb-1 px-1">
+                            <span class="fw-semibold">Current (A) vs Time <span class="badge bg-secondary py-0 fs-9">SIM</span></span>
+                            <span class="text-hard-jam font-mono">Limit: 15.0 A</span>
+                        </div>
+                        <div id="plot-current" style="height: 190px;"></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card p-2 bg-darker border-secondary">
+                        <div class="d-flex justify-content-between text-secondary fs-8 mb-1 px-1">
+                            <span class="fw-semibold">Speed (RPM) vs Time <span class="badge bg-secondary py-0 fs-9">SIM</span></span>
+                            <span class="text-muted font-mono">Target: 2000 RPM</span>
+                        </div>
+                        <div id="plot-speed" style="height: 190px;"></div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card p-2 bg-darker border-secondary">
+                        <div class="d-flex justify-content-between text-secondary fs-8 mb-1 px-1">
+                            <span class="fw-semibold">Temperature (°C) vs Time <span class="badge bg-secondary py-0 fs-9">SIM</span></span>
+                            <span class="text-hard-jam font-mono">Cutoff: 75 °C</span>
+                        </div>
+                        <div id="plot-temp" style="height: 190px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SECTION 4: ML INTELLIGENCE & BENCHMARK LAB -->
+        <!-- ========================================== -->
+        <div id="section-ml" class="card p-3 mb-3 bg-card border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="section-header-title">🧠 4. ML Intelligence, Whitelist Comparison & Confusion Matrix</h5>
+                    <div class="section-header-subtitle">Section 4 &bull; Baseline-Peak-Current & Time-to-Speed Threshold vs Decision Tree vs Random Forest</div>
+                </div>
+                <button class="btn btn-outline-cyan btn-sm py-1 px-3 fs-8 fw-semibold" onclick="retrainModels()">⚡ Retrain on Fresh Split</button>
+            </div>
+
+            <div class="row g-3">
+                <!-- Comparison Table -->
+                <div class="col-lg-7">
+                    <div class="table-responsive rounded-3 border border-secondary">
+                        <table class="table-custom mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Evaluator Metric</th>
+                                    <th>Engineering Baseline</th>
+                                    <th>Decision Tree</th>
+                                    <th class="text-cyan">Random Forest (Selected)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Overall Accuracy</strong></td>
+                                    <td class="font-mono">86.5%</td>
+                                    <td class="font-mono">{{ (dt.accuracy * 100) | round(1) }}%</td>
+                                    <td class="text-normal fw-bold font-mono">{{ (rf.accuracy * 100) | round(1) }}%</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Macro F1-Score</strong></td>
+                                    <td class="font-mono">0.842</td>
+                                    <td class="font-mono">{{ (dt.macro_f1) | round(3) }}</td>
+                                    <td class="text-cyan fw-bold font-mono">{{ (rf.macro_f1) | round(3) }}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Hard-Jam Recall (Safety Critical)</strong></td>
+                                    <td class="font-mono">88.0%</td>
+                                    <td class="font-mono">{{ (dt.hard_jam_recall * 100) | round(1) }}%</td>
+                                    <td class="text-white fw-bold font-mono">{{ (rf.hard_jam_recall * 100) | round(1) }}%</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>False-Alarm Rate (Healthy False Trip)</strong></td>
+                                    <td class="font-mono">12.0%</td>
+                                    <td class="font-mono">{{ (dt.false_alarm_rate * 100) | round(1) }}%</td>
+                                    <td class="text-info fw-bold font-mono">{{ (rf.false_alarm_rate * 100) | round(1) }}%</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Split & Provenance Boundary</strong></td>
+                                    <td colspan="3" class="text-secondary fs-8">Strictly split by independent runs (no row-to-row adjacent telemetry leakage).</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Confusion Matrix Heatmap -->
+                <div class="col-lg-5">
+                    <div class="card p-2 bg-darker border-secondary h-100">
+                        <div class="d-flex justify-content-between text-secondary fs-8 mb-1 px-1">
+                            <span class="fw-semibold">Random Forest Confusion Matrix</span>
+                            <span class="text-cyan font-mono">Normalized per-run</span>
+                        </div>
+                        <div id="plot-cm" style="height: 180px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- SECTION 5: RUN MANIFEST & AUDIT TRAIL      -->
+        <!-- ========================================== -->
+        <div id="section-manifest" class="card p-3 mb-2 bg-card border-secondary">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div>
+                    <h5 class="section-header-title">📜 5. Labelled Test History & Real-Time Log</h5>
+                    <div class="section-header-subtitle">Section 7 &bull; Real-time potentiometer stream & ML audit log: run_id, condition, severity, and MCU acknowledgement</div>
+                </div>
+                <a href="/api/export_csv" class="btn btn-outline-cyan btn-sm py-1 px-3 fs-8 fw-bold">📥 Export 10-Sec Real-Time Stream (CSV)</a>
+            </div>
+
+            <div class="table-responsive rounded-3 border border-secondary" style="max-height: 220px; overflow-y: auto;">
+                <table class="table-custom mb-0" id="manifest-table">
+                    <thead style="position: sticky; top: 0; z-index: 2;">
+                        <tr>
+                            <th>Run ID</th>
+                            <th>Condition ID</th>
+                            <th>Target State</th>
+                            <th>Dial Severity</th>
+                            <th>ML Decision</th>
+                            <th>Confidence</th>
+                            <th>Recommended Action</th>
+                            <th>MCU Ack</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="manifest-tbody">
+                        {% for r in runs %}
+                        <tr>
+                            <td><code class="text-white font-mono">{{ r.run_id }}</code></td>
+                            <td>{{ r.condition_id }}</td>
+                            <td>{{ r.target_condition }}</td>
+                            <td class="font-mono">{{ (r.operator_set_severity * 100) | round(1) }}%</td>
+                            <td>
+                                {% if r.ml_prediction == 'NORMAL' %}<span class="badge badge-status-normal font-mono px-2 py-1">NORMAL</span>
+                                {% elif r.ml_prediction == 'SOFT JAM' %}<span class="badge badge-status-soft font-mono px-2 py-1">SOFT JAM</span>
+                                {% else %}<span class="badge badge-status-hard font-mono px-2 py-1">HARD JAM</span>{% endif %}
+                            </td>
+                            <td class="font-mono">{{ (r.confidence * 100) | round(1) }}%</td>
+                            <td><strong class="text-white font-mono">{{ r.recommended_action }}</strong></td>
+                            <td><small class="text-cyan font-mono">{{ r.stm32_acknowledgement }}</small></td>
+                            <td class="text-muted fs-8 font-mono">{{ r.timestamp }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Bootstrap Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentPotAdc = {{ pot.adc_raw }};
+        let cmData = {{ rf.confusion_matrix | safe }};
+        const cmLabels = ['NORMAL', 'SOFT JAM', 'HARD JAM'];
+
+        // 1. Plot Confusion Matrix
+        Plotly.newPlot('plot-cm', [{
+            z: cmData,
+            x: cmLabels,
+            y: cmLabels,
+            type: 'heatmap',
+            colorscale: [
+                [0, '#101522'],
+                [0.5, '#0E4484'],
+                [1.0, '#00E5FF']
+            ],
+            showscale: false
+        }], {
+            paper_bgcolor: 'transparent',
+            plot_bgcolor: 'transparent',
+            font: { color: '#94A3B8', size: 10, family: 'JetBrains Mono' },
+            margin: { t: 10, b: 25, l: 65, r: 10 },
+            annotations: cmData.flatMap((row, i) => row.map((val, j) => ({
+                text: val.toString(),
+                x: cmLabels[j],
+                y: cmLabels[i],
+                font: { color: '#FFFFFF', size: 12, family: 'JetBrains Mono' },
+                showarrow: false
+            })))
+        }, { responsive: true, displayModeBar: false });
+
+        // 2. Render Initial Waveform Plots (Uses fast Plotly.react for smooth 60fps streaming)
+        let initTelemetry = {{ telemetry_json | safe }};
+        let autoTrack = true;
+        let lastWaveformAdc = null;
+        let isFetchingWaveform = false;
+
+        renderWaveforms(initTelemetry);
+
+        function toggleAutoTrack() {
+            autoTrack = !autoTrack;
+            const btn = document.getElementById("btn-toggle-autotrack");
+            if (autoTrack) {
+                btn.className = "btn btn-sm btn-outline-info py-0 px-2 fs-8 fw-semibold";
+                btn.innerText = "⚡ Auto-Track Dial: ON";
+                lastWaveformAdc = null; // force immediate re-render
+            } else {
+                btn.className = "btn btn-sm btn-outline-secondary py-0 px-2 fs-8 fw-semibold";
+                btn.innerText = "⚡ Auto-Track Dial: OFF";
+            }
+        }
+
+        function updateVerdictDisplay(data, runId = null) {
+            const condCard = document.getElementById("card-verdict-condition");
+            const condEl = document.getElementById("verdict-class");
+            const iconEl = document.getElementById("verdict-icon");
+            const confEl = document.getElementById("verdict-conf");
+            const actionEl = document.getElementById("verdict-action");
+            const ackEl = document.getElementById("verdict-mcu-ack");
+
+            if (runId) {
+                document.getElementById("badge-run-id").innerText = runId;
+            } else {
+                document.getElementById("badge-run-id").innerText = "LIVE_DIAL";
+            }
+
+            condEl.innerText = data.ml_pred;
+            confEl.innerText = (data.ml_conf * 100).toFixed(1) + "%";
+            actionEl.innerText = data.recommended_action;
+            ackEl.innerText = data.stm32_ack.split(" ")[0];
+
+            let color = "#00E676";
+            let bgRgba = "rgba(0, 230, 118, 0.08)";
+            let icon = "🟢";
+            if (data.ml_pred === "SOFT JAM") { 
+                color = "#FFB300"; 
+                bgRgba = "rgba(255, 179, 0, 0.08)";
+                icon = "🟡"; 
+            }
+            if (data.ml_pred === "HARD JAM") { 
+                color = "#FF3838"; 
+                bgRgba = "rgba(255, 56, 56, 0.1)";
+                icon = "🔴"; 
+            }
+
+            condCard.style.borderColor = color;
+            condCard.style.background = bgRgba;
+            condEl.style.color = color;
+            iconEl.innerText = icon;
+            actionEl.style.color = color;
+
+            document.getElementById("val-peak-i").innerText = data.features.peak_current_amp + " A";
+            document.getElementById("val-max-spd").innerText = data.features.max_speed_rpm + " RPM";
+            document.getElementById("val-temp-rise").innerText = "+" + data.features.temp_rise_celsius + " °C";
+        }
+
+        function fetchLiveWaveform(adc) {
+            if (isFetchingWaveform) return;
+            isFetchingWaveform = true;
+            fetch("/api/live_waveform?adc=" + adc)
+            .then(res => res.json())
+            .then(data => {
+                isFetchingWaveform = false;
+                lastWaveformAdc = adc;
+                renderWaveforms(data.telemetry);
+                updateVerdictDisplay(data);
+            })
+            .catch(() => {
+                isFetchingWaveform = false;
+            });
+        }
+
+        function renderWaveforms(tel) {
+            const t = tel.time_sec;
+            const darkLayout = {
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: { color: '#94A3B8', size: 9, family: 'JetBrains Mono' },
+                margin: { t: 10, b: 20, l: 30, r: 10 },
+                xaxis: { gridcolor: '#1B2232', zerolinecolor: '#1B2232' },
+                yaxis: { gridcolor: '#1B2232', zerolinecolor: '#1B2232' }
+            };
+
+            Plotly.react('plot-current', [{
+                x: t, y: tel.current_sim_amp, type: 'scatter', mode: 'lines', line: { color: '#00E5FF', width: 2.2 }
+            }], {
+                ...darkLayout,
+                shapes: [{ type: 'line', y0: 15.0, y1: 15.0, x0: 0, x1: 3.0, line: { color: '#FF3838', dash: 'dash', width: 1.5 } }]
+            }, { responsive: true, displayModeBar: false });
+
+            Plotly.react('plot-speed', [{
+                x: t, y: tel.speed_sim_rpm, type: 'scatter', mode: 'lines', line: { color: '#00E676', width: 2.2 }
+            }], {
+                ...darkLayout,
+                shapes: [{ type: 'line', y0: 2000, y1: 2000, x0: 0, x1: 3.0, line: { color: '#64748B', dash: 'dot', width: 1.5 } }]
+            }, { responsive: true, displayModeBar: false });
+
+            Plotly.react('plot-temp', [{
+                x: t, y: tel.temp_sim_celsius, type: 'scatter', mode: 'lines', line: { color: '#FFB300', width: 2.2 }
+            }], darkLayout, { responsive: true, displayModeBar: false });
+        }
+
+        // 3. Clear Terminal
+        function clearTerminal() {
+            document.getElementById("putty-terminal-box").innerText = "";
+        }
+
+        // 4. Mock Slider Move
+        function onSliderMove(val) {
+            currentPotAdc = parseInt(val);
+            document.getElementById("slider-pct-label").innerText = ((val / 4095.0) * 100).toFixed(1) + "%";
+            fetch("/api/mock_pot", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ adc: currentPotAdc })
+            });
+            if (autoTrack) {
+                fetchLiveWaveform(currentPotAdc);
+            }
+        }
+
+        // 5. Connect / Disconnect Hardware Toggle
+        function toggleHardwareConnection() {
+            const btn = document.getElementById("btn-toggle-link");
+            const port = document.getElementById("com-port-select").value;
+            const isCurrentlyConnected = btn.innerText.trim().toLowerCase() === "disconnect";
+
+            if (!isCurrentlyConnected) {
+                btn.disabled = true;
+                btn.innerText = "Connecting...";
+                fetch("/api/serial/connect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ port: port, baudrate: 115200 })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    btn.disabled = false;
+                    const badge = document.getElementById("header-link-badge");
+                    if (data.is_connected && !data.is_mock_mode) {
+                        btn.innerText = "Disconnect";
+                        btn.className = "btn btn-sm btn-outline-danger py-1 px-3 fs-8 fw-bold";
+                        badge.className = "badge-hardware px-2 py-1 fs-8";
+                        badge.innerHTML = `<span class="led-indicator led-green"></span> HARDWARE (${data.port || port})`;
+                    } else {
+                        btn.innerText = "Connect";
+                        btn.className = "btn btn-sm btn-primary py-1 px-3 fs-8 fw-bold";
+                        badge.className = "badge-mock px-2 py-1 fs-8";
+                        badge.innerHTML = `<span class="led-indicator led-cyan"></span> MOCK MODE`;
+                        if (port !== "MOCK") {
+                            alert(data.message || "Failed to open port " + port);
+                        }
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerText = "Connect";
+                    btn.className = "btn btn-sm btn-primary py-1 px-3 fs-8 fw-bold";
+                });
+            } else {
+                btn.disabled = true;
+                btn.innerText = "Disconnecting...";
+                fetch("/api/serial/disconnect", { method: "POST" })
+                .then(res => res.json())
+                .then(() => {
+                    btn.disabled = false;
+                    btn.innerText = "Connect";
+                    btn.className = "btn btn-sm btn-primary py-1 px-3 fs-8 fw-bold";
+                    const badge = document.getElementById("header-link-badge");
+                    badge.className = "badge-mock px-2 py-1 fs-8";
+                    badge.innerHTML = `<span class="led-indicator led-cyan"></span> MOCK MODE`;
+                    const sourceTag = document.getElementById("pot-source-tag");
+                    if (sourceTag) {
+                        sourceTag.innerText = "MOCK SIMULATION";
+                        sourceTag.className = "badge bg-secondary text-white fs-8";
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerText = "Disconnect";
+                    btn.className = "btn btn-sm btn-outline-danger py-1 px-3 fs-8 fw-bold";
+                });
+            }
+        }
+
+        // 6. Trigger Live Starter Simulation at current potentiometer position
+        function triggerStarterTest() {
+            const btn = document.getElementById("btn-engage-starter");
+            btn.disabled = true;
+            btn.innerText = "⏳ Running ML Transient Analysis...";
+
+            fetch("/api/run_test", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    mode: "POT",
+                    load: currentPotAdc / 4095.0,
+                    pwm: 100.0,
+                    direction: "FORWARD",
+                    ambient_temp: 25.0,
+                    noise: 0.05
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerText = "🚀 Engage Starter Simulation (At Current Dial Load)";
+
+                // Update Verdict Card & Waveforms with formal Run ID
+                updateVerdictDisplay(data, data.run_id);
+                renderWaveforms(data.telemetry);
+                lastWaveformAdc = currentPotAdc;
+
+                // Prepend to Manifest Table
+                const tbody = document.getElementById("manifest-tbody");
+                const badgeClass = data.ml_pred === 'NORMAL' ? 'badge-status-normal' : (data.ml_pred === 'SOFT JAM' ? 'badge-status-soft' : 'badge-status-hard');
+                const rowHtml = `
+                    <tr>
+                        <td><code class="text-white font-mono">${data.run_id}</code></td>
+                        <td>COND_${data.target_condition.replace(' ', '_')}</td>
+                        <td>${data.target_condition}</td>
+                        <td class="font-mono">${(data.features.load_proxy * 100).toFixed(1)}%</td>
+                        <td><span class="badge ${badgeClass} font-mono px-2 py-1">${data.ml_pred}</span></td>
+                        <td class="font-mono">${(data.ml_conf * 100).toFixed(1)}%</td>
+                        <td><strong class="text-white font-mono">${data.recommended_action}</strong></td>
+                        <td><small class="text-cyan font-mono">${data.stm32_ack}</small></td>
+                        <td class="text-muted fs-8 font-mono">Just now</td>
+                    </tr>
+                `;
+                tbody.innerHTML = rowHtml + tbody.innerHTML;
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.innerText = "🚀 Engage Starter Simulation (At Current Dial Load)";
+                alert("Simulation error: " + err);
+            });
+        }
+
+        // 7. High-Frequency Live Hardware & PuTTY Stream Polling (every 250ms = 4 Hz)
+        setInterval(() => {
+            fetch("/api/live_stream")
+            .then(res => res.json())
+            .then(data => {
+                currentPotAdc = data.adc;
+
+                // Update live numbers
+                document.getElementById("live-adc-val").innerText = data.adc;
+                document.getElementById("live-volts-val").innerText = data.voltage.toFixed(2) + " V";
+                
+                // Update bar
+                const bar = document.getElementById("live-adc-bar");
+                bar.style.width = data.percentage + "%";
+                if (data.percentage < 35) {
+                    bar.className = "progress-bar bg-success";
+                } else if (data.percentage < 78) {
+                    bar.className = "progress-bar bg-warning";
+                } else {
+                    bar.className = "progress-bar bg-danger";
+                }
+
+                // Update Zone Alert
+                const alertEl = document.getElementById("live-zone-alert");
+                alertEl.innerText = "CURRENT POTENTIOMETER DIAL ZONE: " + data.zone.toUpperCase();
+                alertEl.style.color = data.zone_color;
+                alertEl.style.borderColor = data.zone_color;
+                alertEl.style.background = data.zone_color + "18";
+
+                // Update Slider if not currently being dragged
+                const slider = document.getElementById("mock-slider");
+                if (slider && document.activeElement !== slider) {
+                    slider.value = data.adc;
+                    document.getElementById("slider-pct-label").innerText = data.percentage + "%";
+                }
+
+                // Update Link Badges & Connect/Disconnect Button State
+                const badge = document.getElementById("header-link-badge");
+                const sourceTag = document.getElementById("pot-source-tag");
+                const toggleBtn = document.getElementById("btn-toggle-link");
+
+                if (data.is_connected && !data.is_mock_mode) {
+                    badge.className = "badge-hardware px-2 py-1 fs-8";
+                    badge.innerHTML = `<span class="led-indicator led-green"></span> HARDWARE (${data.port || "COM9"})`;
+                    sourceTag.innerText = "LIVE STM32 HARDWARE (" + (data.port || "COM9") + ")";
+                    sourceTag.className = "badge bg-success text-white fs-8";
+                    if (toggleBtn && !toggleBtn.disabled && toggleBtn.innerText !== "Connecting..." && toggleBtn.innerText !== "Disconnecting...") {
+                        toggleBtn.innerText = "Disconnect";
+                        toggleBtn.className = "btn btn-sm btn-outline-danger py-1 px-3 fs-8 fw-bold";
+                    }
+                } else {
+                    badge.className = "badge-mock px-2 py-1 fs-8";
+                    badge.innerHTML = `<span class="led-indicator led-cyan"></span> MOCK MODE`;
+                    sourceTag.innerText = "MOCK SIMULATION";
+                    sourceTag.className = "badge bg-secondary text-white fs-8";
+                    if (toggleBtn && !toggleBtn.disabled && toggleBtn.innerText !== "Connecting..." && toggleBtn.innerText !== "Disconnecting...") {
+                        toggleBtn.innerText = "Connect";
+                        toggleBtn.className = "btn btn-sm btn-primary py-1 px-3 fs-8 fw-bold";
+                    }
+                }
+
+                // Update PuTTY Terminal Screen (auto-scroll)
+                const termBox = document.getElementById("putty-terminal-box");
+                if (termBox && data.terminal_lines && data.terminal_lines.length > 0) {
+                    termBox.innerText = data.terminal_lines.join("\n");
+                    termBox.scrollTop = termBox.scrollHeight;
+                }
+
+                // Automatic live update of motor waveforms & verdict when dial moves
+                if (autoTrack && (lastWaveformAdc === null || Math.abs(data.adc - lastWaveformAdc) >= 30)) {
+                    fetchLiveWaveform(data.adc);
+                }
+            })
+            .catch(() => {});
+        }, 250);
+
+        function retrainModels() {
+            fetch("/api/retrain", { method: "POST" })
+            .then(res => res.json())
+            .then(() => {
+                alert("Models retrained!");
+                location.reload();
+            });
+        }
+    </script>
+</body>
+</html>

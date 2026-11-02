@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-3 mb-4" style="border-left: 5px solid var(--color-cyan);">
+    <h4 class="fw-bold text-white m-0">🧪 Interactive Startup Scenario Generator & Test Suite</h4>
+    <p class="text-muted small m-0 mt-1">Execute simulated startup transients, extract high-order features, run ML inference, validate safety, and record to SQLite database.</p>
+</div>
+
+<!-- Controls Form -->
+<div class="card p-3 mb-4 bg-card">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1 fw-bold">Condition Preset</label>
+            <select id="test-mode" class="form-select form-select-sm" onchange="toggleLoadSlider()">
+                <option value="NORMAL" selected>NORMAL Startup (Healthy)</option>
+                <option value="SOFT JAM">SOFT JAM Startup (Friction / Binding)</option>
+                <option value="HARD JAM">HARD JAM Startup (Rotor Lockup)</option>
+                <option value="POT">Follow Real Potentiometer Dial (PA3)</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1 fw-bold">Load Severity Proxy: <span id="load-display" class="text-cyan">0.15</span></label>
+            <input type="range" class="form-range" id="input-load" min="0.0" max="1.0" step="0.02" value="0.15" oninput="document.getElementById('load-display').innerText=this.value">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1 fw-bold">Gate Driver PWM: <span id="test-pwm-display" class="text-white">100%</span></label>
+            <input type="range" class="form-range" id="test-pwm" min="40" max="100" step="5" value="100" oninput="document.getElementById('test-pwm-display').innerText=this.value+'%'">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1">Starter Direction</label>
+            <select id="test-dir" class="form-select form-select-sm">
+                <option value="FORWARD" selected>FORWARD</option>
+                <option value="REVERSE">REVERSE</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1">Ambient Temperature (°C)</label>
+            <input type="number" id="test-temp" class="form-control form-control-sm" value="25.0" step="1.0" min="15.0" max="60.0">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label text-muted small mb-1">Stochastic Sensor Noise (%)</label>
+            <input type="number" id="test-noise" class="form-control form-control-sm" value="5.0" step="1.0" min="1.0" max="20.0">
+        </div>
+    </div>
+    <div class="d-flex gap-3 mt-3">
+        <button id="btn-run-test" class="btn btn-primary px-4 py-2 fw-bold" onclick="runStartupTest()">🚀 START TEST RUN</button>
+        <button class="btn btn-outline-secondary px-3" onclick="resetTestBench()">🧹 Reset Testbench</button>
+    </div>
+</div>
+
+<!-- Test Results Container -->
+<div id="test-results-panel" style="display: none;">
+    <!-- Result Banner -->
+    <div id="result-banner" class="card p-3 mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <div>
+                <span class="fs-7 text-muted text-uppercase fw-bold" id="res-run-id">RUN RESULT</span>
+                <div class="fs-2 fw-extrabold my-1" id="res-class">NORMAL</div>
+            </div>
+            <div class="d-flex gap-4">
+                <div>ML Confidence:<br><strong class="fs-4 text-white" id="res-conf">98.5%</strong></div>
+                <div>Action:<br><strong class="fs-4" id="res-action">ACCEPT_START</strong></div>
+                <div>STM32 Status:<br><strong class="fs-4 text-cyan" id="res-ack">ACCEPTED</strong></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Plots and Extracted Features Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-7">
+            <div class="card p-3 h-100">
+                <h6 class="fw-bold text-white small mb-2">Episode Transient Curves [SIMULATED]</h6>
+                <div id="chart-episode" style="height: 280px;"></div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card p-3 h-100">
+                <h6 class="fw-bold text-white small mb-2">Extracted Feature Vector</h6>
+                <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+                    <table class="table table-dark table-sm table-hover mb-0" id="table-features">
+                        <thead>
+                            <tr><th>Feature</th><th>Extracted Value</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Baseline vs ML Comparison Box -->
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card p-3 bg-darker border-secondary">
+                <div class="kpi-label">ENGINEERING RULE-BASED BASELINE</div>
+                <div class="fs-5 fw-bold text-white my-1" id="res-base-pred">NORMAL</div>
+                <div class="small text-muted" id="res-base-reason">Nominal inrush and acceleration.</div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card p-3 bg-darker border-cyan">
+                <div class="kpi-label text-cyan">RANDOM FOREST ML CLASSIFIER</div>
+                <div class="fs-5 fw-bold text-cyan my-1" id="res-ml-pred">NORMAL</div>
+                <div class="small text-muted">Multivariate probabilistic decision across 13 temporal features.</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleLoadSlider() {
+        const mode = document.getElementById("test-mode").value;
+        const slider = document.getElementById("input-load");
+        if (mode === "POT") {
+            slider.disabled = true;
+        } else {
+            slider.disabled = false;
+        }
+    }
+
+    function runStartupTest() {
+        const btn = document.getElementById("btn-run-test");
+        btn.disabled = true;
+        btn.innerText = "⏳ Running Transient & ML...";
+
+        const payload = {
+            mode: document.getElementById("test-mode").value,
+            load: parseFloat(document.getElementById("input-load").value),
+            pwm: parseFloat(document.getElementById("test-pwm").value),
+            direction: document.getElementById("test-dir").value,
+            ambient_temp: parseFloat(document.getElementById("test-temp").value),
+            noise: parseFloat(document.getElementById("test-noise").value) / 100.0
+        };
+
+        fetch("/api/run_test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerText = "🚀 START TEST RUN";
+            displayResults(data);
+        })
+        .catch(err => {
+            btn.disabled = false;
+            btn.innerText = "🚀 START TEST RUN";
+            alert("Error running test: " + err);
+        });
+    }
+
+    function displayResults(data) {
+        document.getElementById("test-results-panel").style.display = "block";
+        document.getElementById("res-run-id").innerText = `RUN RESULT: ${data.run_id} | TARGET: ${data.target_condition}`;
+        
+        const clsEl = document.getElementById("res-class");
+        const actionEl = document.getElementById("res-action");
+        const banner = document.getElementById("result-banner");
+
+        clsEl.innerText = data.ml_pred;
+        document.getElementById("res-conf").innerText = (data.ml_conf * 100).toFixed(1) + "%";
+        actionEl.innerText = data.recommended_action;
+        document.getElementById("res-ack").innerText = data.stm32_ack;
+
+        let color = '#00E676';
+        if (data.ml_pred === 'SOFT JAM') color = '#FFB300';
+        if (data.ml_pred === 'HARD JAM') color = '#FF3D00';
+
+        clsEl.style.color = color;
+        actionEl.style.color = color;
+        banner.style.borderLeft = "6px solid " + color;
+
+        // Baseline comparison
+        document.getElementById("res-base-pred").innerText = data.baseline_pred;
+        document.getElementById("res-base-reason").innerText = data.baseline_reason;
+        document.getElementById("res-ml-pred").innerText = data.ml_pred + ` (${(data.ml_conf*100).toFixed(1)}% confidence)`;
+
+        // Features Table
+        const tbody = document.querySelector("#table-features tbody");
+        tbody.innerHTML = "";
+        for (let [k, v] of Object.entries(data.features)) {
+            tbody.innerHTML += `<tr><td class="text-muted small">${k}</td><td class="fw-bold">${v}</td></tr>`;
+        }
+
+        // Plotly chart
+        const t = data.telemetry.time_sec;
+        const traces = [
+            { x: t, y: data.telemetry.current_sim_amp, name: 'Current (A)', line: { color: color, width: 2.5 } },
+            { x: t, y: data.telemetry.speed_sim_rpm.map(s => s / 100), name: 'Speed (x100 RPM)', line: { color: '#00E5FF', width: 2 } }
+        ];
+        const layout = {
+            paper_bgcolor: '#161B22',
+            plot_bgcolor: '#0E1117',
+            font: { color: '#8B949E' },
+            margin: { t: 20, b: 30, l: 40, r: 20 },
+            xaxis: { gridcolor: '#21262D' },
+            yaxis: { gridcolor: '#21262D' },
+            shapes: [{ type: 'line', y0: 15.0, y1: 15.0, x0: 0, x1: 3.0, line: { color: '#FF3D00', dash: 'dash' } }]
+        };
+        Plotly.newPlot('chart-episode', traces, layout, { responsive: true, displayModeBar: false });
+    }
+
+    function resetTestBench() {
+        document.getElementById("test-results-panel").style.display = "none";
+    }
+</script>
+{% endblock %}

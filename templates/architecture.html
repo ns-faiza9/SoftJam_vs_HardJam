@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-3 mb-4" style="border-left: 5px solid var(--color-cyan);">
+    <h4 class="fw-bold text-white m-0">🏗️ System Architecture & Signal Topology</h4>
+    <p class="text-muted small m-0 mt-1">Hybrid Hardware + Software Simulation: Real Potentiometer on STM32 + Virtual Motor ODE + Edge Validation.</p>
+</div>
+
+<!-- Signal Authenticity Matrix -->
+<div class="card p-3 mb-4">
+    <h6 class="fw-bold text-white mb-2">1. Signal Authenticity & Provenance Matrix</h6>
+    <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Signal Name</th>
+                    <th>Hardware Source</th>
+                    <th>Classification</th>
+                    <th>Hardware Pin</th>
+                    <th>Role in Drive System</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Potentiometer Position (ADC)</strong></td>
+                    <td>100 kΩ Potentiometer on Breadboard</td>
+                    <td><span class="badge pot-box text-pot border border-pot">REAL HARDWARE INPUT</span></td>
+                    <td><code>PA3 (ADC1_INP15 / A0)</code></td>
+                    <td>Physical dial providing real manual load/friction proxy input</td>
+                </tr>
+                <tr>
+                    <td><strong>Stator Winding Current</strong></td>
+                    <td>Simulated ODE (V = IR + L di/dt + e)</td>
+                    <td><span class="badge bg-secondary-subtle text-cyan border border-cyan-subtle">SIMULATED SYNTHETIC SIGNAL</span></td>
+                    <td>Software Engine</td>
+                    <td>Inrush transient and stall current simulation</td>
+                </tr>
+                <tr>
+                    <td><strong>Rotor Speed (RPM)</strong></td>
+                    <td>Simulated ODE (J dω/dt = Kt*i - Tload)</td>
+                    <td><span class="badge bg-secondary-subtle text-cyan border border-cyan-subtle">SIMULATED SYNTHETIC SIGNAL</span></td>
+                    <td>Software Engine</td>
+                    <td>Kinematic acceleration curve under mechanical drag</td>
+                </tr>
+                <tr>
+                    <td><strong>Encoder Pulse Interval</strong></td>
+                    <td>Simulated Incremental Encoder (24 CPR)</td>
+                    <td><span class="badge bg-secondary-subtle text-cyan border border-cyan-subtle">SIMULATED SYNTHETIC SIGNAL</span></td>
+                    <td>Software Engine</td>
+                    <td>Pulse-to-pulse jitter and period timing</td>
+                </tr>
+                <tr>
+                    <td><strong>Stator Temperature</strong></td>
+                    <td>Simulated Joulean Heating (I^2 * R)</td>
+                    <td><span class="badge bg-secondary-subtle text-cyan border border-cyan-subtle">SIMULATED SYNTHETIC SIGNAL</span></td>
+                    <td>Software Engine</td>
+                    <td>Thermal accumulation under prolonged jam</td>
+                </tr>
+                <tr>
+                    <td><strong>User LED Indicators</strong></td>
+                    <td>NUCLEO-H753ZI Onboard LEDs</td>
+                    <td><span class="badge bg-success-subtle text-success border border-success-subtle">REAL HARDWARE OUTPUT</span></td>
+                    <td><code>PB0 (LD1), PE1 (LD2), PB14 (LD3)</code></td>
+                    <td>Physical visual indicator of validated action (Green/Yellow/Red)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Topology Diagram Card -->
+<div class="card p-3 mb-4">
+    <h6 class="fw-bold text-white mb-3">2. End-to-End Signal & Decision Topology</h6>
+    <div class="p-3 bg-darker rounded border border-secondary text-center">
+        <div class="d-flex justify-content-around align-items-center flex-wrap gap-2">
+            <div class="p-2 rounded border border-pot pot-box" style="width: 140px;">
+                <span class="text-pot fs-7 fw-bold">REAL HARDWARE</span><br>
+                <strong class="text-white small">100kΩ Potentiometer</strong><br>
+                <span class="text-muted fs-8">PA3 / ADC1</span>
+            </div>
+            <span class="fs-4 text-cyan">➔</span>
+            <div class="p-2 rounded border border-cyan bg-card" style="width: 150px;">
+                <span class="text-cyan fs-7 fw-bold">EMBEDDED MCU</span><br>
+                <strong class="text-white small">STM32 NUCLEO-H753ZI</strong><br>
+                <span class="text-muted fs-8">Cortex-M7 @ 480MHz</span>
+            </div>
+            <span class="fs-4 text-cyan">➔</span>
+            <div class="p-2 rounded border border-info bg-card" style="width: 140px;">
+                <span class="text-info fs-7 fw-bold">COMM LINK</span><br>
+                <strong class="text-white small">USB Serial / VCP</strong><br>
+                <span class="text-muted fs-8">115200 Baud JSON</span>
+            </div>
+            <span class="fs-4 text-cyan">➔</span>
+            <div class="p-2 rounded border border-primary bg-card" style="width: 150px;">
+                <span class="text-primary fs-7 fw-bold">LAPTOP ML ENGINE</span><br>
+                <strong class="text-white small">Random Forest Model</strong><br>
+                <span class="text-muted fs-8">Python Flask / Sklearn</span>
+            </div>
+            <span class="fs-4 text-cyan">➔</span>
+            <div class="p-2 rounded border border-danger bg-card" style="width: 140px;">
+                <span class="text-danger fs-7 fw-bold">SAFETY INTERLOCK</span><br>
+                <strong class="text-white small">STM32 Local Check</strong><br>
+                <span class="text-muted fs-8">Hardware Bounds</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Live Serial Log Inspector -->
+<div class="card p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="fw-bold text-white m-0">3. Live USB Serial Communication Traffic (PySerial)</h6>
+        <button class="btn btn-sm btn-outline-cyan fs-7" onclick="refreshSerialLogs()">🔄 Refresh Serial Logs</button>
+    </div>
+    <p class="text-muted small mb-2">Inspect live incoming (RX) and outgoing (TX) ASCII JSON packets flowing between Laptop and STM32.</p>
+    <div class="table-responsive" style="max-height: 240px; overflow-y: auto;">
+        <table class="table table-dark table-sm table-hover mb-0" id="table-logs">
+            <thead>
+                <tr><th style="width: 100px;">Time</th><th style="width: 80px;">Direction</th><th>JSON Message Packet</th></tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td><code>{{ log.time }}</code></td>
+                    <td>
+                        {% if log.dir == 'TX' %}<span class="badge bg-primary">TX (PC➔MCU)</span>
+                        {% elif log.dir == 'RX' %}<span class="badge bg-success">RX (MCU➔PC)</span>
+                        {% else %}<span class="badge bg-secondary">{{ log.dir }}</span>
+                        {% endif %}
+                    </td>
+                    <td><code>{{ log.msg }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function refreshSerialLogs() {
+        location.reload();
+    }
+</script>
+{% endblock %}

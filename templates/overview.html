@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- 1. LIVE HARDWARE & PUTTY TERMINAL (FRONT AND CENTER) -->
+<div class="card p-3 mb-4" style="border-left: 6px solid #00E5FF; background: linear-gradient(135deg, #101624 0%, #17243B 100%);">
+    <div class="d-flex justify-content-between align-items-center flex-wrap mb-2">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fs-4">📟</span>
+            <div>
+                <h4 class="fw-bold text-white m-0">Live STM32 Hardware Feed & PuTTY Terminal</h4>
+                <small class="text-muted">Direct USB Serial Stream from NUCLEO-H753ZI (PA3 Potentiometer)</small>
+            </div>
+        </div>
+        <div>
+            <span id="live-port-badge" class="badge bg-dark border border-secondary px-3 py-2 text-cyan">
+                ● COM9 (115200 Baud)
+            </span>
+        </div>
+    </div>
+
+    <!-- Live Hardware Readouts and PuTTY Box Row -->
+    <div class="row g-3 mt-1">
+        <!-- Left: Live Meters & Explained Zones -->
+        <div class="col-lg-5">
+            <div class="card p-3 h-100 bg-darker border-secondary">
+                <span class="fs-7 fw-bold text-uppercase text-pot">REAL PHYSICAL SENSOR READING</span>
+                
+                <div class="d-flex align-items-baseline gap-2 my-2">
+                    <span class="fs-1 fw-bold text-pot" id="live-big-adc">{{ pot.adc_raw }}</span>
+                    <span class="fs-6 text-muted">/ 4095 ADC counts</span>
+                    <span class="fs-5 fw-bold text-white ms-auto" id="live-big-volts">{{ pot.voltage }} V</span>
+                </div>
+
+                <!-- Colored Range Bar -->
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between fs-8 text-muted mb-1">
+                        <span>0V (Free)</span>
+                        <span>1.15V</span>
+                        <span>2.57V</span>
+                        <span>3.3V (Stall)</span>
+                    </div>
+                    <div class="progress bg-dark" style="height: 12px; border: 1px solid #30363D;">
+                        <div id="live-adc-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" role="progressbar" style="width: {{ (pot.normalized * 100) }}%;"></div>
+                    </div>
+                    <div class="d-flex justify-content-between fs-8 text-muted mt-1">
+                        <span class="text-success fw-bold">🟢 NORMAL (0-35%)</span>
+                        <span class="text-warning fw-bold">🟡 SOFT JAM (35-78%)</span>
+                        <span class="text-danger fw-bold">🔴 HARD JAM (&gt;78%)</span>
+                    </div>
+                </div>
+
+                <!-- Mapped Motor Condition Alert -->
+                <div id="live-zone-alert" class="p-2 rounded mt-2 border text-center fw-bold small" style="background: rgba(255,179,0,0.12); border-color: #FFB300 !important; color: #FFB300;">
+                    CURRENT MOTOR STATUS: SOFT JAM ZONE
+                </div>
+
+                <!-- Plain English Explanation -->
+                <div class="mt-3 p-2 rounded bg-card border border-secondary small text-muted" style="line-height: 1.4;">
+                    💡 <strong>How it works:</strong> The 100kΩ potentiometer on your breadboard controls the mechanical drag proxy. Turn the dial left for <strong>Normal startup</strong>, center for <strong>Soft Jam</strong> (moderate resistance), or turn fully right for <strong>Hard Jam</strong> (locked rotor stall).
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: PuTTY Serial Terminal Window -->
+        <div class="col-lg-7">
+            <div class="card h-100 bg-black border-secondary">
+                <!-- PuTTY Window Titlebar -->
+                <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-dark border-bottom border-secondary" style="border-top-left-radius: 9px; border-top-right-radius: 9px;">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-black text-cyan font-monospace px-2 py-1">PuTTY</span>
+                        <span class="text-white small fw-bold font-monospace" id="putty-title">COM9 - 115200 8-N-1</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-secondary btn-sm py-0 px-2 fs-8" onclick="clearTerminal()">Clear</button>
+                        <span class="badge bg-success-subtle text-success py-1">● LIVE STREAM</span>
+                    </div>
+                </div>
+
+                <!-- PuTTY Black Terminal Screen -->
+                <div id="putty-terminal" class="p-3 font-monospace small" style="background: #000; color: #00FF66; height: 250px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; font-size: 13px;">
+Loading serial feed...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 2. HIGH-LEVEL DECISION & SYSTEM ACTION -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-7">
+        <div class="card h-100 p-3" style="background: {{ status_bg }}; border: 2px solid {{ status_color }};">
+            <div class="d-flex justify-content-between text-muted small fw-bold">
+                <span class="text-uppercase tracking-wider">LATEST ML CLASSIFICATION RESULT</span>
+                <span class="badge bg-secondary">Run: {{ latest.run_id if latest else 'INIT_01' }}</span>
+            </div>
+            <div class="d-flex align-items-center gap-3 my-2">
+                <span class="fs-1">{{ icon }}</span>
+                <span class="fs-3 fw-bold" style="color: {{ status_color }};">{{ current_condition }}</span>
+            </div>
+            <div class="d-flex gap-4 pt-2 border-top border-secondary text-white small">
+                <div>Confidence: <strong class="fs-6">{{ (confidence * 100) | round(1) }}%</strong></div>
+                <div>Action: <strong class="fs-6" style="color: {{ status_color }}">{{ rec_action }}</strong></div>
+                <div>STM32 Link: <strong class="fs-6 text-cyan">{{ stm32_ack }}</strong></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100 p-3 bg-card border-secondary">
+            <div class="kpi-label mb-2">QUICK ACTIONS</div>
+            <div class="d-grid gap-2">
+                <a href="/simulation" class="btn btn-primary fw-semibold">🧪 Run New Startup Test Episode &rarr;</a>
+                <a href="/monitoring" class="btn btn-outline-cyan fw-semibold">📡 View Simulated Multi-Waveform Curves &rarr;</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. KPI COUNTERS & RECENT HISTORY -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-label">Total Startup Runs</div>
+            <div class="kpi-val">{{ counts.TOTAL }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-label">Normal Starts</div>
+            <div class="kpi-val text-normal">{{ counts['NORMAL'] }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-label">Soft Jam Starts</div>
+            <div class="kpi-val text-soft-jam">{{ counts['SOFT JAM'] }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="kpi-card">
+            <div class="kpi-label">Hard Jam Starts</div>
+            <div class="kpi-val text-hard-jam">{{ counts['HARD JAM'] }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="fw-bold text-white m-0">Recent Experiment Runs</h6>
+        <a href="/history" class="btn btn-sm btn-outline-cyan fs-7">Full Audit Table &rarr;</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-dark table-sm table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Run ID</th><th>Target Condition</th><th>ML Result</th><th>Peak Current</th><th>Max Speed</th><th>Recommended Action</th><th>STM32 Ack</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recent_runs %}
+                <tr>
+                    <td><code>{{ r.run_id }}</code></td>
+                    <td>{{ r.target_condition }}</td>
+                    <td>
+                        {% if r.ml_prediction == 'NORMAL' %}
+                        <span class="badge bg-success-subtle text-success">{{ r.ml_prediction }}</span>
+                        {% elif r.ml_prediction == 'SOFT JAM' %}
+                        <span class="badge bg-warning-subtle text-warning">{{ r.ml_prediction }}</span>
+                        {% else %}
+                        <span class="badge bg-danger-subtle text-danger">{{ r.ml_prediction }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.peak_current }} A</td>
+                    <td>{{ r.max_speed }} RPM</td>
+                    <td><small class="fw-bold">{{ r.recommended_action }}</small></td>
+                    <td><small class="text-cyan">{{ r.stm32_acknowledgement }}</small></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function clearTerminal() {
+        document.getElementById("putty-terminal").innerText = "";
+    }
+
+    // High-frequency polling (every 250ms = 4 times per second, matching STM32 250ms delay)
+    let lastLineCount = 0;
+    setInterval(() => {
+        fetch("/api/live_stream")
+        .then(res => res.json())
+        .then(data => {
+            // 1. Update big hardware meters
+            const bigAdc = document.getElementById("live-big-adc");
+            const bigVolts = document.getElementById("live-big-volts");
+            const adcBar = document.getElementById("live-adc-bar");
+            const zoneAlert = document.getElementById("live-zone-alert");
+            const portBadge = document.getElementById("live-port-badge");
+
+            if (bigAdc) bigAdc.innerText = data.adc;
+            if (bigVolts) bigVolts.innerText = data.voltage.toFixed(2) + " V";
+            if (adcBar) {
+                adcBar.style.width = data.percentage + "%";
+                if (data.percentage < 35) {
+                    adcBar.className = "progress-bar bg-success";
+                } else if (data.percentage < 78) {
+                    adcBar.className = "progress-bar bg-warning";
+                } else {
+                    adcBar.className = "progress-bar bg-danger";
+                }
+            }
+            if (zoneAlert) {
+                zoneAlert.innerText = "CURRENT ROTOR CONDITION: " + data.zone;
+                zoneAlert.style.color = data.zone_color;
+                zoneAlert.style.borderColor = data.zone_color;
+                zoneAlert.style.background = data.zone_color + "22";
+            }
+            if (portBadge) {
+                if (data.is_connected && !data.is_mock_mode) {
+                    portBadge.innerText = "● HARDWARE CONNECTED (" + (data.port || "COM9") + ")";
+                    portBadge.className = "badge bg-success-subtle text-success border border-success px-3 py-2";
+                } else {
+                    portBadge.innerText = "● MOCK MODE (Slider Active)";
+                    portBadge.className = "badge bg-dark border border-secondary text-cyan px-3 py-2";
+                }
+            }
+
+            // 2. Update PuTTY Terminal window
+            const terminal = document.getElementById("putty-terminal");
+            if (terminal && data.terminal_lines && data.terminal_lines.length > 0) {
+                terminal.innerText = data.terminal_lines.join("\n");
+                terminal.scrollTop = terminal.scrollHeight; // Auto-scroll down like PuTTY
+            }
+        })
+        .catch(() => {});
+    }, 250);
+</script>
+{% endblock %}

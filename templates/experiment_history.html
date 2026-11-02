@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card p-3 mb-4" style="border-left: 5px solid var(--color-cyan);">
+    <h4 class="fw-bold text-white m-0">📜 Experiment History & Persistent Audit Log (SQLite)</h4>
+    <p class="text-muted small m-0 mt-1">Comprehensive persistent database of startup runs. Every complete startup episode is treated as an independent sample.</p>
+</div>
+
+<!-- Search & Filtering Bar -->
+<div class="card p-3 mb-4 bg-card">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label text-muted small mb-1">Filter Condition</label>
+            <select id="filter-cond" class="form-select form-select-sm" onchange="filterExperiments()">
+                <option value="ALL">ALL Conditions</option>
+                <option value="NORMAL">NORMAL</option>
+                <option value="SOFT JAM">SOFT JAM</option>
+                <option value="HARD JAM">HARD JAM</option>
+            </select>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label text-muted small mb-1">Search Run ID or Action</label>
+            <input type="text" id="filter-search" class="form-control form-control-sm" placeholder="e.g. RUN_001 or ACCEPT" oninput="filterExperiments()">
+        </div>
+        <div class="col-md-3">
+            <a href="/api/export_csv" class="btn btn-outline-cyan btn-sm w-100 py-2">📥 Export Database CSV</a>
+        </div>
+    </div>
+</div>
+
+<!-- Experiments Table -->
+<div class="card p-3 mb-4">
+    <h6 class="fw-bold text-white mb-2">Recorded Episodes (<span id="count-runs">{{ runs | length }}</span>)</h6>
+    <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+        <table class="table table-dark table-hover table-sm align-middle mb-0" id="table-experiments">
+            <thead>
+                <tr>
+                    <th>Run ID</th>
+                    <th>Target</th>
+                    <th>ML Result</th>
+                    <th>Confidence</th>
+                    <th>Peak I (A)</th>
+                    <th>Max Speed</th>
+                    <th>Duration</th>
+                    <th>Temp Rise</th>
+                    <th>Action</th>
+                    <th>STM32 Ack</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in runs %}
+                <tr onclick="drillDown('{{ r.run_id }}')" style="cursor: pointer;">
+                    <td><code>{{ r.run_id }}</code></td>
+                    <td>{{ r.target_condition }}</td>
+                    <td>
+                        {% if r.ml_prediction == 'NORMAL' %}
+                        <span class="badge bg-success-subtle text-success">{{ r.ml_prediction }}</span>
+                        {% elif r.ml_prediction == 'SOFT JAM' %}
+                        <span class="badge bg-warning-subtle text-warning">{{ r.ml_prediction }}</span>
+                        {% else %}
+                        <span class="badge bg-danger-subtle text-danger">{{ r.ml_prediction }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ (r.confidence * 100) | round(1) }}%</td>
+                    <td>{{ r.peak_current }} A</td>
+                    <td>{{ r.max_speed }} RPM</td>
+                    <td>{{ r.startup_duration }} s</td>
+                    <td>{{ r.temp_rise }} °C</td>
+                    <td><small class="fw-bold">{{ r.recommended_action }}</small></td>
+                    <td><small class="text-cyan">{{ r.stm32_acknowledgement }}</small></td>
+                    <td class="text-muted small">{{ r.timestamp }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Episode Replay Drill-Down -->
+<div class="card p-3" id="panel-replay" style="display: none;">
+    <h6 class="fw-bold text-white mb-2">🔎 Episode Transient Replay: <span id="replay-title" class="text-cyan"></span></h6>
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <div id="chart-replay" style="height: 280px;"></div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card p-3 bg-darker border-secondary h-100">
+                <h6 class="text-white small fw-bold mb-2">Archived Metadata</h6>
+                <div id="replay-meta" class="small text-muted" style="line-height: 1.8;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function filterExperiments() {
+        const cond = document.getElementById("filter-cond").value;
+        const query = document.getElementById("filter-search").value.toLowerCase();
+        const rows = document.querySelectorAll("#table-experiments tbody tr");
+
+        let visible = 0;
+        rows.forEach(tr => {
+            const text = tr.innerText.toLowerCase();
+            const matchesQuery = query === "" || text.includes(query);
+            const matchesCond = cond === "ALL" || text.includes(cond.toLowerCase());
+
+            if (matchesQuery && matchesCond) {
+                tr.style.display = "";
+                visible++;
+            } else {
+                tr.style.display = "none";
+            }
+        });
+        document.getElementById("count-runs").innerText = visible;
+    }
+
+    function drillDown(runId) {
+        fetch(`/api/episode_telemetry?run_id=${runId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.telemetry || data.telemetry.length === 0) {
+                alert("Telemetry points not stored for this record.");
+                return;
+            }
+            document.getElementById("panel-replay").style.display = "block";
+            document.getElementById("replay-title").innerText = runId;
+
+            const t = data.telemetry.map(row => row.time_sec);
+            const curr = data.telemetry.map(row => row.current_sim_amp);
+            const spd = data.telemetry.map(row => row.speed_sim_rpm / 100);
+
+            Plotly.newPlot('chart-replay', [
+                { x: t, y: curr, name: 'Current (A)', line: { color: '#00E5FF', width: 2 } },
+                { x: t, y: spd, name: 'Speed (x100 RPM)', line: { color: '#00E676', width: 2 } }
+            ], {
+                paper_bgcolor: '#161B22',
+                plot_bgcolor: '#0E1117',
+                font: { color: '#8B949E' },
+                margin: { t: 20, b: 30, l: 40, r: 20 },
+                xaxis: { gridcolor: '#21262D' },
+                yaxis: { gridcolor: '#21262D' }
+            }, { responsive: true, displayModeBar: false });
+
+            document.getElementById("replay-meta").innerHTML = `
+                <div><strong>Run ID:</strong> <code>${data.meta.run_id}</code></div>
+                <div><strong>Condition ID:</strong> <code>${data.meta.condition_id}</code></div>
+                <div><strong>Target:</strong> ${data.meta.target_condition}</div>
+                <div><strong>ML Prediction:</strong> <span class="text-cyan fw-bold">${data.meta.ml_prediction}</span> (${(data.meta.confidence*100).toFixed(1)}%)</div>
+                <div><strong>Baseline:</strong> ${data.meta.baseline_result}</div>
+                <div><strong>Action:</strong> ${data.meta.recommended_action}</div>
+                <div><strong>STM32 Ack:</strong> ${data.meta.stm32_acknowledgement}</div>
+                <div><strong>Timestamp:</strong> ${data.meta.timestamp}</div>
+            `;
+            document.getElementById("panel-replay").scrollIntoView({ behavior: 'smooth' });
+        });
+    }
+</script>
+{% endblock %}
